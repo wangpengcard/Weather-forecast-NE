@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>玉米病虫害环境预警看板</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        :root {
+            --bg-body: #020617; --bg-panel: #1e293b; --text-main: #f8fcaf;
+            --text-dim: #94a3b8; --accent: #3b82f6; --danger: #ef4444;
+            --warning: #f59e0b; --success: #10b981; --neutral: #64748b;
+        }
+        * { box-sizing: border-box; }
+        body, html { 
+            margin: 0; padding: 0; width: 100vw; height: 100vh; 
+            overflow: hidden; font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+            background: var(--bg-body); color: var(--text-main);
+        }
+        #app { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
+        header { 
+            height: 45px; flex-shrink: 0; background: #000; 
+            border-bottom: 1px solid #334155; display: flex; 
+            align-items: center; padding: 0 15px; justify-content: space-between; 
+        }
+        main { flex: 1; display: flex; overflow: hidden; }
+        aside { 
+            width: 250px; flex-shrink: 0; background: var(--bg-panel); 
+            border-right: 1px solid #334155; display: flex; flex-direction: column; 
+            padding: 15px; gap: 15px;
+        }
+        .select-group label { display: block; font-size: 11px; color: var(--text-dim); margin-bottom: 5px; }
+        .select-row { display: flex; align-items: center; gap: 5px; }
+        select { 
+            flex: 1; padding: 8px; background: #0f172a; color: #fff; 
+            border: 1px solid #334155; border-radius: 4px; font-size: 13px; 
+            outline: none; cursor: pointer; appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='white' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C2.185 5.355 2.403 5 2.801 5h10.398c.398 0 .616.355.35.658l-4.796 5.482a.5.5 0 0 1-.708 0z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 10px center;
+        }
+        input[type="date"] {
+            width: 100%; padding: 8px; background: #0f172a; color: #fff;
+            border: 1px solid #334155; border-radius: 4px; font-size: 13px; outline: none;
+        }
+        .stage-display {
+            background: #0f172a; border: 1px solid #334155; border-radius: 4px;
+            padding: 8px; font-size: 13px; color: var(--text-main);
+        }
+        .stage-display .stage-label { color: var(--text-dim); font-size: 10px; }
+        .calendar { background: #0f172a; border-radius: 8px; padding: 10px; border: 1px solid #475569; }
+        .cal-head { display: flex; gap: 5px; margin-bottom: 10px; }
+        .cal-head select { padding: 4px; font-size: 11px; }
+        .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; font-size: 10px; }
+        .cal-date { height: 24px; line-height: 24px; position: relative; cursor: pointer; }
+        .cal-date.active { background: var(--accent); color: #fff; border-radius: 2px; }
+        .cal-date.has-risk::after { 
+            content: ''; position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%);
+            width: 4px; height: 4px; background: var(--danger); border-radius: 50%;
+        }
+        .cal-date.empty { cursor: default; }
+        .diag-box {
+            flex: 1; background: rgba(15, 23, 42, 0.6); 
+            border-radius: 8px; border: 1px dashed #334155;
+            padding: 10px; overflow-y: auto; font-size: 11px; line-height: 1.6;
+        }
+        .diag-box::-webkit-scrollbar { width: 4px; }
+        .diag-box::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+        .diag-item { margin-bottom: 8px; padding-left: 10px; border-left: 2px solid var(--accent); }
+        .diag-danger { border-left-color: var(--danger); color: #fda4af; }
+        .diag-warning { border-left-color: var(--warning); color: #fde047; }
+        .diag-success { border-left-color: var(--success); color: #6ee7b7; }
+        .diag-info { border-left-color: var(--accent); color: #93c5fd; }
+        .content { flex: 1; display: flex; flex-direction: column; padding: 15px; gap: 10px; overflow: hidden; }
+        .dashboard { 
+            display: grid; grid-template-columns: repeat(7, 1fr); 
+            gap: 10px; background: #0f172a; padding: 12px; 
+            border-radius: 8px; border: 1px solid #334155; flex-shrink: 0;
+        }
+        .light-box { text-align: center; }
+        .dot { width: 12px; height: 12px; border-radius: 50%; margin: 0 auto 5px; background: #334155; }
+        .dot.active { box-shadow: 0 0 10px currentColor; }
+        .l-txt { font-size: 11px; margin-bottom: 2px; }
+        .l-msg { font-size: 10px; color: var(--text-dim); }
+        #chart-main { flex: 1; background: #000; border-radius: 8px; border: 1px solid #334155; cursor: crosshair; }
+        .param-grid { 
+            background: var(--bg-panel); border-radius: 8px; border: 1px solid #334155; 
+            padding: 10px; display: grid; grid-template-columns: repeat(9, 1fr); gap: 8px;
+            flex-shrink: 0;
+        }
+        .p-card { text-align: center; border-right: 1px dotted #334155; overflow: hidden; min-width: 0; }
+        .p-card:nth-child(9n) { border-right: none; }
+        .p-lab { font-size: 10px; color: var(--text-dim); margin-bottom: 3px; white-space: nowrap; }
+        .p-val { font-size: 11px; font-weight: bold; color: var(--text-main); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <header>
+        <div style="font-weight: bold; color: var(--accent);">🌽 玉米病虫害环境预警看板</div>
+        <div style="font-size: 12px; color: var(--text-dim);">
+            状态: <span :style="{color: isConnected ? 'var(--success)' : 'var(--danger)'}">
+                {{ isConnected ? '● 已连接' : '○ 同步数据中...' }}
+            </span>
+            <span v-if="isLocked" style="margin-left:10px; color:var(--warning)">[ 指示线已锁定 ]</span>
+        </div>
+    </header>
+
+    <main>
+        <aside>
+            <!-- 两级地址菜单 -->
+            <div class="select-group">
+                <label>省份</label>
+                <select v-model="selectedProvince" @change="onProvinceChange">
+                    <option v-for="p in provinceList" :key="p" :value="p">{{ p }}</option>
+                </select>
+            </div>
+            <div class="select-group">
+                <label>市/县</label>
+                <select v-model="selectedTownId" @change="onTownChange">
+                    <option v-for="t in currentCities" :key="t.id" :value="t.id">{{ t.name }}</option>
+                </select>
+            </div>
+
+            <!-- 播种日期 -->
+            <div class="select-group">
+                <label>播种日期（自动推算生育期）</label>
+                <input type="date" v-model="plantingDate" @change="onPlantingDateChange">
+            </div>
+
+            <!-- 当前生育期显示 -->
+            <div class="stage-display">
+                <div class="stage-label">当前生育期（积温推算）</div>
+                <div>{{ currentStage }}</div>
+            </div>
+
+            <!-- 日历 -->
+            <div class="calendar">
+                <div class="cal-head">
+                    <select v-model="viewYear"><option v-for="y in [2025,2026]" :value="y">{{y}}年</option></select>
+                    <select v-model="viewMonth"><option v-for="m in 12" :value="m-1">{{m}}月</option></select>
+                </div>
+                <div class="cal-grid">
+                    <div style="color:var(--text-dim)" v-for="d in ['一','二','三','四','五','六','日']" :key="d">{{ d }}</div>
+                    <div v-for="(day, idx) in calDays" :key="idx" @click="clickCalDate(day)" 
+                         :class="['cal-date', day.type === 'empty' ? 'empty' : '', day.isToday ? 'active' : '', day.hasRisk ? 'has-risk' : '']">
+                        {{ day.val }}
+                    </div>
+                </div>
+            </div>
+
+            <!-- 诊断提示栏 -->
+            <div class="diag-box">
+                <div v-if="!isConnected" class="diag-item diag-info">正在同步数据...</div>
+                <div v-else-if="diagMsgs.length === 0" class="diag-item diag-success">当前环境参数正常，无异常预警。</div>
+                <div v-for="msg in diagMsgs" :key="msg.text" :class="['diag-item', msg.type]">
+                    {{ msg.text }}
+                </div>
+            </div>
+
+            <div style="font-size:10px; color:var(--text-dim); line-height:1.5;">
+                * 8天 daily 预报 + 历史回算<br>
+                * 病虫害模型基于积温+湿度+降雨<br>
+                * 数据源: OpenWeatherMap 3.0
+            </div>
+        </aside>
+
+        <div class="content">
+            <!-- 7项风险指示灯 -->
+            <div class="dashboard">
+                <div class="light-box" v-for="l in risks" :key="l.name">
+                    <div class="l-txt">{{ l.name }}</div>
+                    <div :class="['dot', isConnected ? 'active' : '']" 
+                         :style="{ color: isConnected ? l.color : '#334155', background: 'currentColor' }"></div>
+                    <div class="l-msg">{{ isConnected ? l.status : '--' }}</div>
+                </div>
+            </div>
+
+            <!-- 主图表（8天预报） -->
+            <div id="chart-main"></div>
+
+            <!-- 参数面板 -->
+            <div class="param-grid">
+                <div class="p-card"><div class="p-lab">日期</div><div class="p-val">{{ sel.date || '--' }}</div></div>
+                <div class="p-card"><div class="p-lab">最高温</div><div class="p-val">{{ sel.temp_max ?? '--' }}°C</div></div>
+                <div class="p-card"><div class="p-lab">最低温</div><div class="p-val">{{ sel.temp_min ?? '--' }}°C</div></div>
+                <div class="p-card"><div class="p-lab">降水量</div><div class="p-val">{{ sel.precipitation ?? '0' }}mm</div></div>
+                <div class="p-card"><div class="p-lab">湿度</div><div class="p-val">{{ sel.humidity ?? '--' }}%</div></div>
+                <div class="p-card"><div class="p-lab">露点</div><div class="p-val">{{ sel.dew_point ?? '--' }}°C</div></div>
+                <div class="p-card"><div class="p-lab">风速</div><div class="p-val">{{ sel.wind_speed ?? '--' }}m/s</div></div>
+                <div class="p-card"><div class="p-lab">阵风</div><div class="p-val">{{ sel.wind_gust ?? '--' }}m/s</div></div>
+                <div class="p-card"><div class="p-lab">云量</div><div class="p-val">{{ sel.clouds ?? '--' }}%</div></div>
+                <div class="p-card"><div class="p-lab">UVI</div><div class="p-val">{{ sel.uvi ?? '--' }}</div></div>
+                <div class="p-card"><div class="p-lab">天气</div><div class="p-val">{{ sel.weather_desc || '--' }}</div></div>
+                <div class="p-card"><div class="p-lab">降水概率</div><div class="p-val">{{ sel.pop != null ? (sel.pop * 100).toFixed(0) + '%' : '--' }}</div></div>
+                <div class="p-card"><div class="p-lab">D30水分</div><div class="p-val">{{ sel.d30 || '--' }}</div></div>
+                <div class="p-card"><div class="p-lab">积温(播种起)</div><div class="p-val">{{ sel.gdd ?? '--' }}°C·d</div></div>
+                <div class="p-card"><div class="p-lab">生育期</div><div class="p-val">{{ currentStage }}</div></div>
+                <div class="p-card"><div class="p-lab">数据天数</div><div class="p-val">{{ historyDays }}天</div></div>
+                <div class="p-card"><div class="p-lab">数据状态</div><div class="p-val">{{ sel.flag_desc || '--' }}</div></div>
+                <div class="p-card"></div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+const { createApp, ref, onMounted, reactive, watch, computed } = Vue;
+
+createApp({
+    setup() {
+        const isConnected = ref(false);
+        const isLocked = ref(false);
+        const base = ".";
+
+        // ==================== 地址数据（按省份分组）====================
+        const TOWN_DATA = {
+            "黑龙江省": [
+                {id:"1",name:"哈尔滨市",lat:45.58,lon:126.29},{id:"2",name:"尚志市",lat:45.21,lon:127.96},
+                {id:"3",name:"五常市",lat:44.92,lon:127.16},{id:"4",name:"巴彦县",lat:46.08,lon:127.4},
+                {id:"5",name:"宾县",lat:45.75,lon:127.48},{id:"6",name:"方正县",lat:45.83,lon:128.82},
+                {id:"7",name:"木兰县",lat:45.95,lon:128.04},{id:"8",name:"通河县",lat:45.97,lon:128.75},
+                {id:"9",name:"延寿县",lat:45.45,lon:128.33},{id:"10",name:"依兰县",lat:46.31,lon:129.56},
+                {id:"11",name:"齐齐哈尔市",lat:47.35,lon:123.84},{id:"12",name:"讷河市",lat:48.46,lon:124.88},
+                {id:"13",name:"拜泉县",lat:47.6,lon:126.09},{id:"14",name:"富裕县",lat:47.77,lon:124.47},
+                {id:"15",name:"甘南县",lat:47.91,lon:123.5},{id:"16",name:"克东县",lat:48.04,lon:126.25},
+                {id:"17",name:"克山县",lat:48.04,lon:125.88},{id:"18",name:"龙江县",lat:47.33,lon:123.2},
+                {id:"19",name:"泰来县",lat:46.39,lon:123.41},{id:"20",name:"依安县",lat:47.89,lon:125.3},
+                {id:"21",name:"牡丹江市",lat:44.57,lon:129.55},{id:"22",name:"东宁市",lat:44.09,lon:131.12},
+                {id:"23",name:"海林市",lat:44.59,lon:129.37},{id:"24",name:"穆棱市",lat:44.92,lon:130.52},
+                {id:"25",name:"宁安市",lat:44.34,lon:129.48},{id:"26",name:"绥芬河市",lat:44.41,lon:131.16},
+                {id:"27",name:"林口县",lat:45.28,lon:130.27},{id:"28",name:"佳木斯市",lat:46.8,lon:130.31},
+                {id:"29",name:"抚远市",lat:48.36,lon:134.3},{id:"30",name:"富锦市",lat:46.33,lon:132.19},
+                {id:"31",name:"同江市",lat:47.64,lon:132.5},{id:"32",name:"桦川县",lat:46.24,lon:130.55},
+                {id:"33",name:"桦南县",lat:46.24,lon:130.55},{id:"34",name:"汤原县",lat:46.73,lon:129.9},
+                {id:"35",name:"大庆市",lat:46.58,lon:125.1},{id:"36",name:"杜尔伯特蒙古族自治县",lat:46.86,lon:124.44},
+                {id:"37",name:"林甸县",lat:47.17,lon:124.86},{id:"38",name:"肇源县",lat:45.52,lon:125.08},
+                {id:"39",name:"肇州县",lat:45.7,lon:125.26},{id:"40",name:"鸡西市",lat:45.3,lon:125.1},
+                {id:"41",name:"虎林市",lat:45.76,lon:132.93},{id:"42",name:"密山市",lat:45.53,lon:131.84},
+                {id:"43",name:"鸡东县",lat:45.26,lon:131.12},{id:"44",name:"双鸭山市",lat:46.64,lon:131.15},
+                {id:"45",name:"宝清县",lat:46.33,lon:132.19},{id:"46",name:"集贤县",lat:46.73,lon:131.13},
+                {id:"47",name:"饶河县",lat:46.79,lon:134.01},{id:"48",name:"友谊县",lat:46.77,lon:131.8},
+                {id:"49",name:"伊春市",lat:47.72,lon:128.84},{id:"50",name:"铁力市",lat:46.98,lon:128.02},
+                {id:"51",name:"大箐山县",lat:47.14,lon:129.28},{id:"52",name:"丰林县",lat:48.29,lon:129.53},
+                {id:"53",name:"嘉荫县",lat:48.89,lon:130.39},{id:"54",name:"南岔县",lat:47.14,lon:129.28},
+                {id:"55",name:"汤旺县",lat:48.45,lon:129.43},{id:"56",name:"七台河市",lat:45.77,lon:131.0},
+                {id:"57",name:"勃利县",lat:45.75,lon:130.57},{id:"58",name:"鹤岗市",lat:47.35,lon:130.29},
+                {id:"59",name:"萝北县",lat:47.57,lon:130.84},{id:"60",name:"绥滨县",lat:47.29,lon:131.85},
+                {id:"61",name:"黑河市",lat:50.24,lon:127.52},{id:"62",name:"北安市",lat:48.24,lon:126.49},
+                {id:"63",name:"嫩江市",lat:49.18,lon:125.22},{id:"64",name:"五大连池市",lat:48.51,lon:126.19},
+                {id:"65",name:"孙吴县",lat:49.43,lon:127.33},{id:"66",name:"逊克县",lat:49.57,lon:128.48},
+                {id:"67",name:"绥化市",lat:46.65,lon:126.96},{id:"68",name:"安达市",lat:46.45,lon:125.3},
+                {id:"69",name:"海伦市",lat:47.46,lon:126.97},{id:"70",name:"肇东市",lat:46.06,lon:125.98},
+                {id:"71",name:"兰西县",lat:46.26,lon:126.29},{id:"72",name:"明水县",lat:47.17,lon:125.91},
+                {id:"73",name:"青冈县",lat:46.69,lon:126.1},{id:"74",name:"庆安县",lat:46.88,lon:127.5},
+                {id:"75",name:"绥棱县",lat:47.24,lon:127.11},{id:"76",name:"望奎县",lat:46.83,lon:126.48},
+                {id:"77",name:"加格达奇区",lat:52.5,lon:123.9},{id:"78",name:"漠河市",lat:52.97,lon:122.54},
+                {id:"79",name:"呼玛县",lat:51.73,lon:126.65},{id:"80",name:"塔河县",lat:52.33,lon:124.7}
+            ],
+            "吉林省": [
+                {id:"81",name:"长春市",lat:43.88,lon:125.31},{id:"82",name:"公主岭市",lat:43.5,lon:124.82},
+                {id:"83",name:"德惠市",lat:44.53,lon:125.7},{id:"84",name:"榆树市",lat:44.82,lon:126.55},
+                {id:"85",name:"农安县",lat:44.43,lon:125.18},{id:"86",name:"吉林市",lat:43.83,lon:126.55},
+                {id:"87",name:"蛟河市",lat:43.72,lon:127.34},{id:"88",name:"桦甸市",lat:42.97,lon:126.74},
+                {id:"89",name:"舒兰市",lat:44.41,lon:126.96},{id:"90",name:"磐石市",lat:42.94,lon:126.06},
+                {id:"91",name:"永吉县",lat:43.67,lon:126.5},{id:"92",name:"四平市",lat:43.16,lon:124.35},
+                {id:"93",name:"双辽市",lat:43.52,lon:123.5},{id:"94",name:"梨树县",lat:43.3,lon:124.33},
+                {id:"95",name:"伊通满族自治县",lat:43.34,lon:125.3},{id:"96",name:"辽源市",lat:42.88,lon:125.14},
+                {id:"97",name:"东丰县",lat:42.67,lon:125.53},{id:"98",name:"东辽县",lat:42.92,lon:124.99},
+                {id:"99",name:"通化市",lat:41.73,lon:125.94},{id:"100",name:"梅河口市",lat:42.53,lon:125.68},
+                {id:"101",name:"集安市",lat:41.12,lon:126.19},{id:"102",name:"通化县",lat:41.68,lon:125.76},
+                {id:"103",name:"辉南县",lat:42.68,lon:126.04},{id:"104",name:"柳河县",lat:42.28,lon:125.74},
+                {id:"105",name:"白山市",lat:41.93,lon:126.42},{id:"106",name:"临江市",lat:41.81,lon:126.92},
+                {id:"107",name:"抚松县",lat:42.33,lon:127.28},{id:"108",name:"靖宇县",lat:42.38,lon:126.81},
+                {id:"109",name:"长白朝鲜族自治县",lat:41.41,lon:128.2},{id:"110",name:"松原市",lat:45.14,lon:124.82},
+                {id:"111",name:"扶余市",lat:44.98,lon:126.05},{id:"112",name:"长岭县",lat:44.27,lon:123.96},
+                {id:"113",name:"乾安县",lat:45.0,lon:124.03},{id:"114",name:"前郭尔罗斯蒙古族自治县",lat:45.11,lon:124.82},
+                {id:"115",name:"白城市",lat:41.93,lon:126.42},{id:"116",name:"洮南市",lat:45.36,lon:122.79},
+                {id:"117",name:"大安市",lat:45.51,lon:124.29},{id:"118",name:"镇赉县",lat:45.85,lon:123.2},
+                {id:"119",name:"通榆县",lat:44.8,lon:123.09},{id:"120",name:"延吉市",lat:42.89,lon:129.5},
+                {id:"121",name:"图们市",lat:42.97,lon:129.84},{id:"122",name:"敦化市",lat:43.37,lon:128.23},
+                {id:"123",name:"珲春市",lat:42.86,lon:130.36},{id:"124",name:"龙井市",lat:42.76,lon:129.42},
+                {id:"125",name:"和龙市",lat:42.54,lon:129.0},{id:"126",name:"汪清县",lat:43.31,lon:129.76},
+                {id:"127",name:"安图县",lat:43.11,lon:128.9}
+            ],
+            "蒙东地区": [
+                {id:"128",name:"海拉尔区",lat:49.23,lon:119.82},{id:"129",name:"满洲里市",lat:49.58,lon:117.43},
+                {id:"130",name:"牙克石市",lat:49.28,lon:120.73},{id:"131",name:"扎兰屯市",lat:48.01,lon:122.75},
+                {id:"132",name:"额尔古纳市",lat:50.24,lon:120.18},{id:"133",name:"根河市",lat:50.78,lon:121.52},
+                {id:"134",name:"阿荣旗",lat:48.12,lon:123.45},{id:"135",name:"陈巴尔虎旗",lat:49.33,lon:119.43},
+                {id:"136",name:"新巴尔虎左旗",lat:48.22,lon:118.27},{id:"137",name:"新巴尔虎右旗",lat:48.67,lon:116.82},
+                {id:"138",name:"莫力达瓦达斡尔族自治旗",lat:48.48,lon:124.51},{id:"139",name:"鄂伦春自治旗",lat:50.59,lon:123.72},
+                {id:"140",name:"鄂温克族自治旗",lat:49.15,lon:119.75},{id:"141",name:"乌兰浩特市",lat:46.07,lon:122.09},
+                {id:"142",name:"阿尔山市",lat:47.17,lon:119.93},{id:"143",name:"突泉县",lat:45.38,lon:121.56},
+                {id:"144",name:"科尔沁右翼前旗",lat:46.08,lon:121.95},{id:"145",name:"科尔沁右翼中旗",lat:45.06,lon:121.47},
+                {id:"146",name:"扎赉特旗",lat:46.72,lon:122.89},{id:"147",name:"科尔沁区",lat:43.65,lon:122.24},
+                {id:"148",name:"霍林郭勒市",lat:45.53,lon:119.66},{id:"149",name:"开鲁县",lat:43.6,lon:121.31},
+                {id:"150",name:"科尔沁左翼中旗",lat:44.12,lon:123.31},{id:"151",name:"科尔沁左翼后旗",lat:42.96,lon:122.36},
+                {id:"152",name:"库伦旗",lat:42.73,lon:121.81},{id:"153",name:"奈曼旗",lat:42.84,lon:120.66},
+                {id:"154",name:"扎鲁特旗",lat:44.56,lon:120.91},{id:"155",name:"赤峰市",lat:42.26,lon:118.89},
+                {id:"156",name:"林西县",lat:43.61,lon:118.06},{id:"157",name:"宁城县",lat:41.6,lon:119.34},
+                {id:"158",name:"阿鲁科尔沁旗",lat:43.88,lon:120.09},{id:"159",name:"巴林左旗",lat:43.98,lon:119.38},
+                {id:"160",name:"巴林右旗",lat:43.53,lon:118.67},{id:"161",name:"克什克腾旗",lat:43.26,lon:117.54},
+                {id:"162",name:"翁牛特旗",lat:42.94,lon:119.02},{id:"163",name:"喀喇沁旗",lat:41.93,lon:118.7},
+                {id:"164",name:"敖汉旗",lat:42.29,lon:119.92}
+            ],
+            "辽宁省": [
+                {id:"165",name:"沈阳市",lat:41.79,lon:123.45},{id:"166",name:"新民市",lat:41.98,lon:122.83},
+                {id:"167",name:"康平县",lat:42.5,lon:123.43},{id:"168",name:"法库县",lat:42.5,lon:123.43},
+                {id:"169",name:"大连市",lat:38.92,lon:121.64},{id:"170",name:"瓦房店市",lat:39.62,lon:122.0},
+                {id:"171",name:"庄河市",lat:39.68,lon:122.96},{id:"172",name:"长海县",lat:39.28,lon:122.59},
+                {id:"173",name:"鞍山市",lat:41.10,lon:122.99},{id:"174",name:"海城市",lat:40.85,lon:122.75},
+                {id:"175",name:"台安县",lat:41.38,lon:122.43},{id:"176",name:"岫岩满族自治县",lat:40.29,lon:123.28},
+                {id:"177",name:"抚顺市",lat:41.88,lon:123.96},{id:"178",name:"抚顺县",lat:41.88,lon:123.91},
+                {id:"179",name:"新宾满族自治县",lat:41.73,lon:125.03},{id:"180",name:"清原满族自治县",lat:42.1,lon:124.92},
+                {id:"181",name:"本溪市",lat:41.29,lon:123.77},{id:"182",name:"本溪满族自治县",lat:41.3,lon:124.11},
+                {id:"183",name:"桓仁满族自治县",lat:41.26,lon:125.35},{id:"184",name:"丹东市",lat:40.00,lon:124.35},
+                {id:"185",name:"东港市",lat:39.86,lon:124.15},{id:"186",name:"凤城市",lat:40.45,lon:124.06},
+                {id:"187",name:"宽甸满族自治县",lat:40.73,lon:124.78},{id:"188",name:"锦州市",lat:41.09,lon:121.12},
+                {id:"189",name:"凌海市",lat:41.16,lon:121.35},{id:"190",name:"北镇市",lat:41.6,lon:121.8},
+                {id:"191",name:"黑山县",lat:41.67,lon:122.12},{id:"192",name:"义县",lat:41.53,lon:121.23},
+                {id:"193",name:"营口市",lat:40.66,lon:122.23},{id:"194",name:"盖州市",lat:40.4,lon:122.35},
+                {id:"195",name:"大石桥市",lat:40.63,lon:122.51},{id:"196",name:"阜新市",lat:42.02,lon:121.67},
+                {id:"197",name:"阜新蒙古族自治县",lat:42.06,lon:121.75},{id:"198",name:"彰武县",lat:42.38,lon:122.54},
+                {id:"199",name:"辽阳市",lat:41.26,lon:123.23},{id:"200",name:"灯塔市",lat:41.42,lon:123.33},
+                {id:"201",name:"辽阳县",lat:41.2,lon:123.1},{id:"202",name:"盘锦市",lat:41.12,lon:122.07},
+                {id:"203",name:"盘山县",lat:41.24,lon:121.99},{id:"204",name:"铁岭市",lat:42.22,lon:123.72},
+                {id:"205",name:"调兵山市",lat:42.47,lon:123.55},{id:"206",name:"开原市",lat:42.54,lon:124.03},
+                {id:"207",name:"铁岭县",lat:42.22,lon:123.72},{id:"208",name:"西丰县",lat:42.74,lon:124.72},
+                {id:"209",name:"昌图县",lat:42.78,lon:124.1},{id:"210",name:"朝阳市",lat:41.54,lon:120.45},
+                {id:"211",name:"北票市",lat:41.8,lon:120.77},{id:"212",name:"凌源市",lat:41.24,lon:119.4},
+                {id:"213",name:"朝阳县",lat:41.57,lon:120.45},{id:"214",name:"建平县",lat:41.4,lon:119.64},
+                {id:"215",name:"喀喇沁左翼蒙古族自治县",lat:41.12,lon:119.74},{id:"216",name:"葫芦岛市",lat:40.56,lon:120.38},
+                {id:"217",name:"兴城市",lat:40.61,lon:120.73},{id:"218",name:"绥中县",lat:40.32,lon:120.34},
+                {id:"219",name:"建昌县",lat:40.81,lon:119.8}
+            ]
+        };
+
+        // ==================== 状态 ====================
+        const provinceList = Object.keys(TOWN_DATA);
+        const selectedProvince = ref(provinceList[0]);
+        const selectedTownId = ref(TOWN_DATA[provinceList[0]][0].id);
+        const currentCities = ref(TOWN_DATA[provinceList[0]]);
+
+        const plantingDate = ref(localStorage.getItem('corn_plant_date') || '2026-05-01');
+        const currentStage = ref('播种期');
+        const historyDays = ref(0);
+
+        const now = new Date();
+        const viewYear = ref(now.getFullYear());
+        const viewMonth = ref(now.getMonth());
+
+        const forecastMap = ref({});
+        const historyData = ref([]);
+        const diagMsgs = ref([]);
+
+        const sel = reactive({
+            date: null, temp_max: null, temp_min: null, precipitation: null,
+            humidity: null, dew_point: null, wind_speed: null, wind_gust: null,
+            clouds: null, uvi: null, weather_desc: null, pop: null,
+            d30: null, gdd: null, flag_desc: null
+        });
+
+        const risks = ref([
+            {name:'干旱', color:'#64748b', status:'统计中'},
+            {name:'高温', color:'#10b981', status:'正常'},
+            {name:'低温', color:'#64748b', status:'统计中'},
+            {name:'倒伏', color:'#10b981', status:'低风险'},
+            {name:'水涝', color:'#10b981', status:'正常'},
+            {name:'病虫害', color:'#10b981', status:'平稳'},
+            {name:'飞防评分', color:'#64748b', status:'-'}
+        ]);
+
+        let chart = null;
+
+        // ==================== 生育期自动推算 ====================
+        const GDD_STAGES = [
+            { name: '播种期', gdd: 0 },
+            { name: 'VE出苗', gdd: 80 },
+            { name: 'V1', gdd: 140 },
+            { name: 'V3', gdd: 260 },
+            { name: 'V6拔节', gdd: 400 },
+            { name: 'V9', gdd: 600 },
+            { name: 'V12大喇叭口', gdd: 850 },
+            { name: 'VT抽穗', gdd: 1100 },
+            { name: 'R1吐丝', gdd: 1200 },
+            { name: 'R2水泡', gdd: 1400 },
+            { name: 'R3乳熟', gdd: 1600 },
+            { name: 'R4蜡熟', gdd: 1800 },
+            { name: 'R5凹陷', gdd: 1950 },
+            { name: 'R6完熟', gdd: 2100 }
+        ];
+
+        const calcGDD = (tempMin, tempMax) => {
+            if (tempMin == null || tempMax == null) return 0;
+            const avg = (tempMin + tempMax) / 2;
+            return Math.max(0, avg - 10);
+        };
+
+        const updateStageFromHistory = () => {
+            const pDate = new Date(plantingDate.value);
+            const today = new Date();
+            if (pDate > today) { currentStage.value = '未到播种期'; return; }
+
+            let gddSum = 0;
+            const townId = selectedTownId.value;
+            const townHistory = historyData.value.filter(h => h[0] === townId);
+
+            for (const row of townHistory) {
+                const d = new Date(row[4]);
+                if (d < pDate) continue;
+                const tMin = parseFloat(row[5]);
+                const tMax = parseFloat(row[6]);
+                gddSum += calcGDD(tMin, tMax);
+            }
+
+            // 如果没有历史数据，用预报数据估算
+            if (townHistory.length === 0) {
+                const fc = forecastMap.value[townId] || [];
+                for (const day of fc) {
+                    gddSum += calcGDD(day.temp_min, day.temp_max);
+                }
+            }
+
+            sel.gdd = gddSum.toFixed(0);
+
+            let stage = '播种期';
+            for (const s of GDD_STAGES) {
+                if (gddSum >= s.gdd) stage = s.name;
+            }
+            currentStage.value = stage;
+        };
+
+        // ==================== 工具函数 ====================
+        const getWindDirText = (deg) => {
+            if (deg == null) return null;
+            const val = Math.floor((deg / 22.5) + 0.5);
+            const arr = ["北","北东北","东北","东东北","东","东东南","东南","南东南","南","南西南","西南","西西南","西","西西北","西北","北西北"];
+            return arr[(val % 16)] + "风";
+        };
+
+        const getBeaufort = (ms) => {
+            if (ms == null) return null;
+            if (ms < 0.3) return 0; if (ms < 1.6) return 1; if (ms < 3.4) return 2;
+            if (ms < 5.5) return 3; if (ms < 8.0) return 4; if (ms < 10.8) return 5;
+            if (ms < 13.9) return 6; if (ms < 17.2) return 7; if (ms < 20.8) return 8;
+            if (ms < 24.5) return 9; if (ms < 28.5) return 10; if (ms < 32.7) return 11;
+            return 12;
+        };
+
+        // ==================== 菜单事件 ====================
+        const onProvinceChange = () => {
+            currentCities.value = TOWN_DATA[selectedProvince.value];
+            selectedTownId.value = currentCities.value[0].id;
+            onTownChange();
+        };
+
+        const onTownChange = () => {
+            isLocked.value = false;
+            renderChart();
+            updateDetail();
+            updateStageFromHistory();
+        };
+
+        const onPlantingDateChange = () => {
+            localStorage.setItem('corn_plant_date', plantingDate.value);
+            updateStageFromHistory();
+            judgeRisks();
+        };
+
+        // ==================== 图表渲染（8天daily）====================
+        const renderChart = () => {
+            if (!chart) chart = echarts.init(document.getElementById('chart-main'));
+            const data = forecastMap.value[selectedTownId.value] || [];
+            if (data.length === 0) return;
+
+            chart.setOption({
+                title: { text: '未来8天预报（点击锁定查看详情）', textStyle: {color: '#94a3b8', fontSize: 11}, left: 10, top: 10 },
+                tooltip: { trigger: 'axis',
+                    formatter: (params) => {
+                        const d = data[params[0]?.dataIndex];
+                        if (!d) return '';
+                        return `<b>${d.date}</b><br/>
+                            天气: ${d.weather_desc}<br/>
+                            温度: ${d.temp_min}°C ~ ${d.temp_max}°C<br/>
+                            降水: ${d.precipitation_total}mm (概率${(d.pop*100).toFixed(0)}%)<br/>
+                            湿度: ${d.humidity}% | 露点: ${d.dew_point}°C<br/>
+                            风速: ${d.wind_speed}m/s | 阵风: ${d.wind_gust}m/s<br/>
+                            云量: ${d.clouds}% | UVI: ${d.uvi}`;
+                    }
+                },
+                grid: { top: 60, bottom: 30, left: 45, right: 45 },
+                xAxis: {
+                    type: 'category',
+                    data: data.map(d => {
+                        const dir = getWindDirText(d.wind_deg) || '';
+                        return d.date.slice(5) + '\n' + d.weather_desc;
+                    }),
+                    axisLabel: { color: '#94a3b8', fontSize: 10, interval: 0, lineHeight: 16 }
+                },
+                yAxis: [
+                    { type: 'value', name: '°C', axisLabel: {color: '#94a3b8'}, splitLine: { show: true, lineStyle: { color: '#334155', type: 'dashed' } } },
+                    { type: 'value', name: 'mm', position: 'right', min: 0, splitLine: { show: false } }
+                ],
+                legend: { data: ['最高温', '最低温', '降水量'], textStyle: { color: '#94a3b8' }, top: 30 },
+                series: [
+                    { name: '最高温', type: 'line', data: data.map(d => d.temp_max), smooth: true, itemStyle: {color: '#ef4444'}, lineStyle: {width: 2} },
+                    { name: '最低温', type: 'line', data: data.map(d => d.temp_min), smooth: true, itemStyle: {color: '#3b82f6'}, lineStyle: {width: 2} },
+                    { name: '降水量', type: 'bar', yAxisIndex: 1, data: data.map(d => d.precipitation_total || 0), itemStyle: {color: '#006400', opacity: 0.6}, barWidth: '40%' }
+                ]
+            });
+
+            chart.off('click');
+            chart.on('click', (params) => {
+                if (params.dataIndex !== undefined) {
+                    isLocked.value = true;
+                    updateDetailByIndex(params.dataIndex);
+                }
+            });
+
+            chart.getZr().off('click');
+            chart.getZr().on('click', (params) => {
+                const point = [params.offsetX, params.offsetY];
+                if (!chart.containPixel('grid', point)) {
+                    isLocked.value = false;
+                    updateDetail();
+                }
+            });
+
+            chart.on('updateAxisPointer', (event) => {
+                if (isLocked.value) return;
+                const p = event.axesInfo && event.axesInfo[0];
+                if (p && p.value !== undefined) updateDetailByIndex(p.value);
+            });
+        };
+
+        const updateDetailByIndex = (idx) => {
+            const data = forecastMap.value[selectedTownId.value] || [];
+            if (idx < 0 || idx >= data.length) return;
+            const d = data[idx];
+            sel.date = d.date;
+            sel.temp_max = d.temp_max;
+            sel.temp_min = d.temp_min;
+            sel.precipitation = d.precipitation_total;
+            sel.humidity = d.humidity;
+            sel.dew_point = d.dew_point;
+            sel.wind_speed = d.wind_speed;
+            sel.wind_gust = d.wind_gust;
+            sel.clouds = d.clouds;
+            sel.uvi = d.uvi;
+            sel.weather_desc = d.weather_desc;
+            sel.pop = d.pop;
+            sel.flag_desc = idx === 0 ? '今日实况' : '未来预报';
+            judgeRisksForDay(idx);
+        };
+
+        const updateDetail = () => {
+            const data = forecastMap.value[selectedTownId.value] || [];
+            if (data.length > 0) updateDetailByIndex(0);
+        };
+
+        // ==================== 日历 ====================
+        const calDays = computed(() => {
+            const first = new Date(viewYear.value, viewMonth.value, 1);
+            let startOffset = first.getDay();
+            startOffset = startOffset === 0 ? 6 : startOffset - 1;
+            const total = new Date(viewYear.value, viewMonth.value + 1, 0).getDate();
+            const days = [];
+            for (let i = 0; i < startOffset; i++) days.push({ type: 'empty' });
+            const forecastData = forecastMap.value[selectedTownId.value] || [];
+            for (let i = 1; i <= total; i++) {
+                const dateStr = `${viewYear.value}-${String(viewMonth.value + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+                const dayData = forecastData.filter(d => d.date === dateStr);
+                const hasRisk = dayData.some(d => (d.wind_gust || d.wind_speed || 0) > 10.8 || d.temp_max >= 35 || d.precipitation_total > 50);
+                days.push({ val: i, type: 'day', dateStr, isToday: dateStr === now.toISOString().split('T')[0], hasRisk });
+            }
+            return days;
+        });
+
+        const clickCalDate = (day) => {
+            if (!day.val || day.type !== 'day') return;
+            const data = forecastMap.value[selectedTownId.value] || [];
+            const dayData = data.filter(d => d.date === day.dateStr);
+            if (dayData.length === 0) { diagMsgs.value = [{type:'diag-info', text:`${day.dateStr}：暂无预报数据`}]; return; }
+            const d = dayData[0];
+            let msg = `【${day.dateStr}】${d.weather_desc}，${d.temp_min}~${d.temp_max}°C，降水${d.precipitation_total}mm，湿度${d.humidity}%，风速${d.wind_speed}m/s`;
+            diagMsgs.value = [{type: day.hasRisk ? 'diag-warning' : 'diag-info', text: msg}];
+        };
+
+        // ==================== 风险判定模型 ====================
+        const getStageIndex = () => {
+            const stageNames = GDD_STAGES.map(s => s.name);
+            let idx = stageNames.indexOf(currentStage.value);
+            return idx >= 0 ? idx : 0;
+        };
+
+        const judgeRisksForDay = (dayIdx) => {
+            const townId = selectedTownId.value;
+            const forecast = forecastMap.value[townId] || [];
+            if (dayIdx >= forecast.length) return;
+            const item = forecast[dayIdx];
+            const msgs = [];
+            const si = getStageIndex();
+
+            // ===== 1. 干旱（D30水分平衡）=====
+            const townHistory = historyData.value.filter(h => h[0] === townId);
+            if (townHistory.length < 15) {
+                risks.value[0].status = `积累中(${townHistory.length}天)`;
+                risks.value[0].color = '#64748b';
+                sel.d30 = '积累中';
+            } else {
+                let d30Sum = 0;
+                for (const row of townHistory) {
+                    const rain = parseFloat(row[13]) || 0;
+                    const tAvg = parseFloat(row[7]) || 0;
+                    const rainEff = rain > 10 ? rain * 0.85 : rain;
+                    const pet = Math.max(0, tAvg * 0.18);
+                    d30Sum += (rainEff - pet);
+                }
+                // 加上预报中的未来几天
+                for (let i = 1; i <= dayIdx; i++) {
+                    const fc = forecast[i];
+                    if (!fc) break;
+                    const rainEff = (fc.precipitation_total || 0) > 10 ? fc.precipitation_total * 0.85 : (fc.precipitation_total || 0);
+                    const pet = Math.max(0, (fc.temp_avg || (fc.temp_min + fc.temp_max) / 2) * 0.18);
+                    d30Sum += (rainEff - pet);
+                }
+                sel.d30 = d30Sum.toFixed(1) + 'mm';
+                const isDrought = d30Sum < -70;
+                const isMildDrought = d30Sum < -40;
+                risks.value[0].status = isDrought ? '重度干旱' : (isMildDrought ? '轻度干旱' : '适宜');
+                risks.value[0].color = isDrought ? '#ef4444' : (isMildDrought ? '#f59e0b' : '#10b981');
+                if (isDrought) msgs.push({type:'diag-danger', text:'🔴 重度干旱预警：D30水分严重亏缺('+sel.d30+')，需及时灌溉。'});
+                else if (isMildDrought) msgs.push({type:'diag-warning', text:'🟡 轻度干旱：D30水分偏低('+sel.d30+')，注意保墒。'});
+            }
+
+            // ===== 2. 高温热害 =====
+            const tMax = item.temp_max || 0;
+            const isHot = tMax >= 35;
+            const isDryHot = tMax >= 32 && (item.humidity || 100) < 30;
+            const isUVIHigh = (item.uvi || 0) > 6 && (item.clouds || 100) < 20;
+            risks.value[1].status = isHot ? '高温热害' : (isDryHot ? '干热风' : '正常');
+            risks.value[1].color = isHot ? '#ef4444' : (isDryHot ? '#f59e0b' : '#10b981');
+            if (isHot) msgs.push({type:'diag-danger', text:`🔴 高温热害预警：最高温${tMax}°C，花粉活力下降，影响授粉结实。`});
+            if (isDryHot) msgs.push({type:'diag-warning', text:`🟡 干热风风险：${tMax}°C + 湿度${item.humidity}%，加速蒸腾失水。`});
+            if (isUVIHigh) msgs.push({type:'diag-warning', text:'🟡 强光灼伤风险：UVI>6且云量极低。'});
+
+            // ===== 3. 低温冷害 =====
+            const tMin = item.temp_min || 0;
+            if (si <= 5) { // V6及以前
+                const isFreeze = tMin < 0;
+                const isCold = tMin < 5;
+                risks.value[2].status = isFreeze ? '霜冻' : (isCold ? '低温僵苗' : '正常');
+                risks.value[2].color = isFreeze ? '#ef4444' : (isCold ? '#f59e0b' : '#10b981');
+                if (isFreeze) msgs.push({type:'diag-danger', text:`🔴 霜冻预警：最低温${tMin}°C，幼苗可能冻死。`});
+                else if (isCold) msgs.push({type:'diag-warning', text:`🟡 苗期低温：${tMin}°C，生长缓慢，注意保温。`});
+            } else if (si <= 7) { // V6-V12
+                const isCool = tMin < 10;
+                risks.value[2].status = isCool ? '果穗分化受阻' : '正常';
+                risks.value[2].color = isCool ? '#f59e0b' : '#10b981';
+                if (isCool) msgs.push({type:'diag-warning', text:`🟡 拔节期低温：${tMin}°C，影响果穗分化。`});
+            } else {
+                const isCool = tMin < 8;
+                risks.value[2].status = isCool ? '灌浆受阻' : '正常';
+                risks.value[2].color = isCool ? '#f59e0b' : '#10b981';
+                if (isCool) msgs.push({type:'diag-warning', text:`🟡 灌浆期低温：${tMin}°C，灌浆速度减慢。`});
+            }
+
+            // ===== 4. 倒伏 =====
+            const gust = item.wind_gust || item.wind_speed || 0;
+            const stageFactor = si >= 6 ? 1.5 : 1.0; // V12以后风险更高
+            const rainContrib = (item.precipitation_total || 0) * 0.3;
+            const stress = gust * stageFactor + rainContrib;
+            const isWindRisk = stress > 15 || gust > 10.8;
+            risks.value[3].status = isWindRisk ? '高风险' : '低风险';
+            risks.value[3].color = isWindRisk ? '#ef4444' : '#10b981';
+            if (isWindRisk) msgs.push({type:'diag-danger', text:`🔴 倒伏预警：阵风${gust.toFixed(1)}m/s(${getBeaufort(gust)}级)${rainContrib > 0 ? ' + 降雨'+item.precipitation_total+'mm' : ''}，应力值${stress.toFixed(1)}。`});
+
+            // ===== 5. 洪涝 =====
+            const rain1 = item.precipitation_total || 0;
+            const isFlood = rain1 > 50;
+            const isWaterlog = rain1 > 30;
+            risks.value[4].status = isFlood ? '暴雨洪涝' : (isWaterlog ? '积水风险' : '正常');
+            risks.value[4].color = isFlood ? '#ef4444' : (isWaterlog ? '#f59e0b' : '#10b981');
+            if (isFlood) msgs.push({type:'diag-danger', text:`🔴 暴雨洪涝预警：日降水${rain1}mm，根系缺氧，植株萎蔫。`});
+            else if (isWaterlog) msgs.push({type:'diag-warning', text:`🟡 积水风险：日降水${rain1}mm，低洼地块注意排水。`});
+
+            // ===== 6. 飞防评分 =====
+            let flyScore = 100;
+            if (gust > 8 || tMax > 35 || (item.humidity || 100) < 30) flyScore = 0;
+            else {
+                if (tMax - (item.dew_point || 0) < 2.5) flyScore -= 25;
+                if ((item.uvi || 0) > 5) flyScore -= 15;
+                if (tMax > 30) flyScore -= 20;
+                if (rain1 > 5) flyScore = 0;
+            }
+            risks.value[6].status = flyScore + '分';
+            risks.value[6].color = flyScore >= 70 ? '#10b981' : (flyScore >= 40 ? '#f59e0b' : '#ef4444');
+
+            // ===== 7. 病虫害矩阵 =====
+            let pests = [];
+            const tAvg = item.temp_avg || (item.temp_min + item.temp_max) / 2;
+            const humidity = item.humidity || 0;
+            const dewPoint = item.dew_point || 0;
+            const dewDiff = tAvg - dewPoint;
+            const clouds = item.clouds || 0;
+
+            // A. 玉米螟 — V12/VT期, 23-30℃, 湿度>70%
+            if ((si === 6 || si === 7) && tAvg >= 23 && tAvg <= 30 && humidity > 70) {
+                pests.push({name:'玉米螟', detail:`V12/VT期+${tAvg}°C+湿度${humidity}%，产卵孵化适宜`});
+            }
+            // B. 粘虫 — V6-R2, 23-30℃, 降雨后高湿
+            if (si >= 5 && si <= 9 && tAvg >= 23 && tAvg <= 30 && humidity > 75) {
+                // 检查近几天是否有较大降雨
+                const recentRain = forecast.slice(Math.max(0, dayIdx-2), dayIdx).some(d => (d.precipitation_total || 0) > 10);
+                if (recentRain && (item.clouds || 100) < 50) {
+                    pests.push({name:'粘虫', detail:`V6-R2期+雨后转晴+${tAvg}°C+湿度${humidity}%，迁入产卵高峰`});
+                }
+            }
+            // C. 大斑病 — V12-R4, 20-25℃, 湿度>90%
+            if (si >= 6 && si <= 12 && tAvg >= 20 && tAvg <= 25 && humidity > 90) {
+                pests.push({name:'大斑病', detail:`V12-R4期+${tAvg}°C+湿度${humidity}%，病菌孢子萌发侵染`});
+            }
+            // D. 小斑病 — V12-R4, 25-32℃, 湿度>80%
+            if (si >= 6 && si <= 12 && tAvg >= 25 && tAvg <= 32 && humidity > 80) {
+                pests.push({name:'小斑病', detail:`V12-R4期+${tAvg}°C+湿度${humidity}%，高温高湿利于发病`});
+            }
+            // E. 锈病 — 20-30℃, 湿度>95% 或连续阴雨
+            if (tAvg >= 20 && tAvg <= 30 && (humidity > 95 || (clouds > 80 && rain1 > 5))) {
+                pests.push({name:'锈病', detail:`${tAvg}°C+湿度${humidity}%+阴雨天气，夏孢子传播侵染`});
+            }
+            // F. 茎腐病 — 灌浆期(R2-R4), 高温高湿+暴风雨
+            if (si >= 9 && si <= 12 && tAvg > 25 && humidity > 80 && gust > 8) {
+                pests.push({name:'茎腐病', detail:`灌浆期+高温高湿+大风(${gust.toFixed(1)}m/s)，根茎部易感染`});
+            }
+            // G. 黑粉病 — 播种-V3, 21-28℃, 中等湿度
+            if (si <= 3 && tAvg >= 21 && tAvg <= 28 && humidity >= 40 && humidity <= 70) {
+                pests.push({name:'黑粉病', detail:`苗期+${tAvg}°C+湿度${humidity}%，土壤带菌侵染幼苗`});
+            }
+            // H. 粗缩病 — V1-V9, 灰飞虱传毒, 20-28℃
+            if (si >= 1 && si <= 5 && tAvg >= 20 && tAvg <= 28 && humidity > 60) {
+                pests.push({name:'粗缩病(灰飞虱)', detail:`苗期+${tAvg}°C+湿度${humidity}%，灰飞虱活跃传毒期`});
+            }
+            // I. 蚜虫 — 苗期, 高温干旱
+            if (si <= 5 && tAvg > 28 && humidity < 50) {
+                pests.push({name:'蚜虫', detail:`苗期+高温干旱(${tAvg}°C/湿度${humidity}%)，蚜虫快速繁殖`});
+            }
+            // J. 红蜘蛛 — 干旱+高温
+            if (sel.d30 && parseFloat(sel.d30) < -50 && tAvg > 30) {
+                pests.push({name:'红蜘蛛', detail:`干旱(D30=${sel.d30})+高温${tAvg}°C，螨类大量发生`});
+            }
+            // K. 地老虎 — 苗期, 夜间低温+湿度适中
+            if (si <= 3 && tMin < 12 && humidity > 50 && humidity < 80) {
+                pests.push({name:'地老虎', detail:`苗期+夜间${tMin}°C+湿度${humidity}%，幼虫咬断茎基`});
+            }
+            // L. 穗腐病 — 成熟期(R4-R6), 连续阴雨
+            if (si >= 12 && si <= 14 && humidity > 85 && clouds > 70) {
+                pests.push({name:'穗腐病', detail:`成熟期+湿度${humidity}%+阴雨，果穗易腐烂`});
+            }
+            // M. 灰斑病 — R1-R5, 高湿弱光
+            if (si >= 8 && si <= 13 && dewDiff < 2 && clouds > 70) {
+                pests.push({name:'灰斑病', detail:`R1-R5期+露点差${dewDiff.toFixed(1)}°C+云量${clouds}%，高湿弱光利于发病`});
+            }
+
+            risks.value[5].status = pests.length > 0 ? pests.map(p => p.name).join('/') : '平稳';
+            risks.value[5].color = pests.length > 0 ? (pests.some(p => ['大斑病','茎腐病','玉米螟','粘虫'].includes(p.name)) ? '#ef4444' : '#f59e0b') : '#10b981';
+            for (const p of pests) {
+                msgs.push({type: 'diag-warning', text: `🟡 ${p.name}预警：${p.detail}。`});
+            }
+
+            diagMsgs.value = msgs;
+        };
+
+        const judgeRisks = () => { judgeRisksForDay(0); };
+
+        // ==================== 数据加载 ====================
+        const loadData = async () => {
+            try {
+                const ts = `?t=${Date.now()}`;
+                const [fRes, hRes] = await Promise.all([
+                    axios.get(`${base}/forecasts.json${ts}`),
+                    axios.get(`${base}/weather_history.csv${ts}`).catch(() => null)
+                ]);
+
+                forecastMap.value = typeof fRes.data === 'string' ? JSON.parse(fRes.data) : fRes.data;
+
+                // 解析 history CSV
+                if (hRes && hRes.data) {
+                    const lines = hRes.data.split('\n').slice(1).filter(r => r.includes(','));
+                    historyData.value = lines.map(r => r.split(','));
+                    historyDays.value = new Set(historyData.value.map(r => r[4])).size;
+                }
+
+                isConnected.value = true;
+                onTownChange();
+            } catch (e) {
+                console.error("数据加载失败:", e);
+                isConnected.value = false;
+            }
+        };
+
+        onMounted(() => {
+            loadData();
+            window.addEventListener('resize', () => chart && chart.resize());
+        });
+
+        return {
+            isConnected, isLocked,
+            provinceList, selectedProvince, selectedTownId, currentCities,
+            plantingDate, currentStage, historyDays,
+            viewYear, viewMonth, calDays,
+            risks, sel, diagMsgs,
+            onProvinceChange, onTownChange, onPlantingDateChange, clickCalDate
+        };
+    }
+}).mount('#app');
+</script>
+</body>
+</html>
