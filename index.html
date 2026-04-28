@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>玉米病虫害环境预警看板</title>
+    <title>玉米环境逆境预警看板</title>
     <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
@@ -101,7 +101,7 @@
 
 <div id="app">
     <header>
-        <div style="font-weight: bold; color: var(--accent);">🌽 玉米病虫害环境预警看板</div>
+        <div style="font-weight: bold; color: var(--accent);">🌽 玉米环境逆境预警看板</div>
         <div style="font-size: 12px; color: var(--text-dim);">
             状态: <span :style="{color: isConnected ? 'var(--success)' : 'var(--danger)'}">
                 {{ isConnected ? '● 已连接' : '○ 同步数据中...' }}
