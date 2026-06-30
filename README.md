@@ -1,2 +1,2 @@
 # Weather-forecast-NE
-card
+SOHU
