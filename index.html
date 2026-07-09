@@ -128,7 +128,7 @@
 
     <main>
         <aside>
-            <!-- 两级地址菜单（同一排） ->
+            <!-- 两级地址菜单（同一排） -->
             <div class="select-group">
                 <div class="select-row">
                     <select v-model="selectedProvince" @change="onProvinceChange" style="width:45%">
@@ -208,9 +208,10 @@
                 <div class="p-card"><div class="p-lab">UVI</div><div class="p-val">{{ sel.uvi ?? '--' }}</div></div>
                 <div class="p-card"><div class="p-lab">天气</div><div class="p-val">{{ sel.weather_desc || '--' }}</div></div>
                 <div class="p-card"><div class="p-lab">降水概率</div><div class="p-val">{{ sel.pop != null ? (sel.pop * 100).toFixed(0) + '%' : '--' }}</div></div>
-                <div class="p-card"><div class="p-lab">D30水分</div><div class="p-val">{{ sel.d30 || '--' }}</div></div>
+                <div class="p-card"><div class="p-lab">水分亏缺/允许</div><div class="p-val">{{ sel.d30 || '--' }}</div></div>
                 <div class="p-card"><div class="p-lab">有效积温(播种起)</div><div class="p-val">{{ sel.gdd ?? '--' }}°C·d</div></div>
                 <div class="p-card"><div class="p-lab">生育期</div><div class="p-val">{{ currentStage }}</div></div>
+                <div class="p-card"><div class="p-lab">当日产量损失</div><div class="p-val" :style="{color: totalYieldLoss > 5 ? 'var(--danger)' : totalYieldLoss > 2 ? 'var(--warning)' : 'var(--text-main)'}">{{ totalYieldLoss.toFixed(1) }}%</div></div>
                 <div class="p-card"><div class="p-lab">数据天数</div><div class="p-val">{{ historyDays }}天</div></div>
                 <div class="p-card"><div class="p-lab">数据状态</div><div class="p-val">{{ sel.flag_desc || '--' }}</div></div>
                 <div class="p-card"></div>
@@ -398,7 +399,7 @@ createApp({
             return 12;
         };
 
-        // ==================== 有效积温计算（10~30℃截断，6温度点）====================
+        // ==================== 有效积温计算（8~30℃截断，FAO-56标准）====================
         const GDD_STAGES = [
             { name: '播种期', gdd: 0 },
             { name: 'VE出苗', gdd: 80 },
@@ -410,15 +411,15 @@ createApp({
             { name: 'VT抽穗', gdd: 1100 },
             { name: 'R1吐丝', gdd: 1200 },
             { name: 'R2水泡', gdd: 1400 },
-            { name: 'R3乳熟', gdd: 1600 },
-            { name: 'R4蜡熟', gdd: 1800 },
-            { name: 'R5凹陷', gdd: 1950 },
-            { name: 'R6完熟', gdd: 2100 }
+            { name: 'R3乳熟', gdd: 1550 },
+            { name: 'R4蜡熟', gdd: 1700 },
+            { name: 'R5凹陷', gdd: 1800 },
+            { name: 'R6完熟', gdd: 1900 }
         ];
 
         // 单个温度点的有效积温贡献：截断 Tbase~Tcap ℃
-        const GDD_TBASE = 8;   // 玉米生物学下限温度（早熟品种8℃，晚熟10℃）
-        const GDD_TCAP  = 33;  // 玉米有效积温上限（30℃偏保守，33℃有文献支持）
+        const GDD_TBASE = 8;   // FAO-56 玉米生物学下限温度
+        const GDD_TCAP  = 30;  // FAO-56 玉米有效积温上限
         const gddContrib = (t) => {
             if (t == null) return 0;
             const capped = Math.min(Math.max(t, GDD_TBASE), GDD_TCAP);
@@ -486,6 +487,95 @@ createApp({
             const start = new Date(d.getFullYear(), 0, 0);
             return Math.floor((d - start) / 86400000);
         };
+
+        // ==================== FAO-56 作物系数 Kc + ETc ====================
+        // Kc 参数（FAO-56 Table 12，玉米标准条件）
+        const KC_PARAMS = { kc_ini: 0.30, kc_mid: 1.20, kc_end: 0.60 };
+
+        // 根据生育期阶段获取当前 Kc（线性插值）
+        const getKc = (stageIndex) => {
+            if (stageIndex <= 1) return KC_PARAMS.kc_ini;                          // 播种-出苗
+            if (stageIndex <= 5) return 0.30 + (stageIndex - 1) * 0.225;           // 发育期线性增长
+            if (stageIndex <= 9) return KC_PARAMS.kc_mid;                           // 中期（抽雄-灌浆）
+            if (stageIndex <= 13) return 1.20 - (stageIndex - 9) * 0.15;           // 后期递减
+            return KC_PARAMS.kc_end;
+        };
+
+        // 根系深度 progression（FAO-56，玉米）
+        const ROOT_DEPTH = [
+            { stage: 0, depth: 0.30 },   // 播种
+            { stage: 3, depth: 0.60 },   // V3
+            { stage: 5, depth: 1.00 },   // V6 拔节
+            { stage: 7, depth: 1.30 },   // V12
+            { stage: 9, depth: 1.50 },   // R1 吐丝（最大）
+            { stage: 14, depth: 1.50 },  // R6 完熟
+        ];
+
+        const getRootDepth = (stageIndex) => {
+            for (let i = ROOT_DEPTH.length - 1; i >= 0; i--) {
+                if (stageIndex >= ROOT_DEPTH[i].stage) return ROOT_DEPTH[i].depth;
+            }
+            return 0.30;
+        };
+
+        // FAO-56 土壤水分参数（典型壤土）
+        const SOIL_FC = 180;        // 田间持水量 mm/m
+        const SOIL_WP = 60;         // 萎蔫点 mm/m
+        const P_DEPLETION = 0.55;   // 玉米耗竭系数
+
+        // 计算根区可用水
+        const getRAW = (stageIndex) => {
+            const zr = getRootDepth(stageIndex);
+            const TAW = (SOIL_FC - SOIL_WP) * zr;  // 总可用水 mm
+            const RAW = TAW * P_DEPLETION;           // 允许耗竭量 mm
+            return { TAW, RAW, zr };
+        };
+
+        // 计算 ETc（作物蒸散量 = ET0 × Kc）
+        const calcETc = (tMean, tMin, tMax, lat, dayOfYear, stageIndex) => {
+            const et0 = calcPET(tMean, tMin, tMax, lat, dayOfYear);
+            const kc = getKc(stageIndex);
+            return et0 * kc;
+        };
+
+        // FAO-56 水分胁迫系数 Ks
+        const calcKs = (depletion, RAW) => {
+            if (depletion <= RAW) return 1.0;
+            const TAW = RAW / P_DEPLETION;
+            const stressDepletion = depletion - RAW;
+            const remaining = TAW - RAW;
+            if (remaining <= 0) return 0;
+            return Math.max(0, 1 - (stressDepletion / remaining));
+        };
+
+        // FAO-33 阶段产量反应因子 Ky
+        const KY_STAGES = [
+            { name: '播种期', ky: 0.40 },
+            { name: 'VE出苗', ky: 0.40 },
+            { name: 'V1', ky: 0.40 },
+            { name: 'V3', ky: 0.40 },
+            { name: 'V6拔节', ky: 0.40 },
+            { name: 'V9', ky: 0.40 },
+            { name: 'V12大喇叭口', ky: 1.50 },
+            { name: 'VT抽穗', ky: 1.50 },
+            { name: 'R1吐丝', ky: 1.50 },
+            { name: 'R2水泡', ky: 1.25 },
+            { name: 'R3乳熟', ky: 0.50 },
+            { name: 'R4蜡熟', ky: 0.50 },
+            { name: 'R5凹陷', ky: 0.50 },
+            { name: 'R6完熟', ky: 0.50 },
+        ];
+
+        // 估算当日水分胁迫导致的产量损失百分比
+        const calcYieldLoss = (rain, etc, stageIndex) => {
+            const ky = KY_STAGES[stageIndex]?.ky || 1.25;
+            const etRatio = Math.min(1, rain / Math.max(1, etc));
+            const waterStress = Math.max(0, 1 - etRatio);
+            return ky * waterStress * 100;
+        };
+
+        // 累积产量损失
+        const totalYieldLoss = ref(0);
 
         // 历史CSV数据：用6列温度(row[5]=morn, row[6]=day, row[7]=eve, row[8]=night, row[9]=min, row[10]=max)
         const calcGDDHistory = (row) => {
@@ -707,7 +797,7 @@ createApp({
             const msgs = [];
             const si = getStageIndex();
 
-            // ===== 1. 干旱（D30水分平衡）=====
+            // ===== 1. 干旱（FAO-56 土壤水分平衡 + ETc）=====
             const townHistory = historyData.value.filter(h => h[0] === townId);
             if (townHistory.length < 15) {
                 risks.value[0].status = `积累中(${townHistory.length}天)`;
@@ -715,10 +805,11 @@ createApp({
                 sel.d30 = '积累中';
             } else {
                 let d30Sum = 0;
-                // 获取当前城镇纬度用于 Hargreaves
+                let totalDepletion = 0;
                 const allTowns = Object.values(TOWN_DATA).flat();
                 const curTown = allTowns.find(t => t.id === townId);
                 const lat = curTown ? curTown.lat : 45;
+                const { RAW, zr } = getRAW(si);
 
                 for (const row of townHistory) {
                     const rain = parseFloat(row[13]) || 0;
@@ -731,8 +822,8 @@ createApp({
                     const validT = [tMorn,tDay,tEve,tNight,tMinH,tMaxH].filter(v => v && !isNaN(v));
                     const tAvg = validT.length ? validT.reduce((a,b)=>a+b,0)/validT.length : 0;
                     const rainEff = rain > 10 ? rain * 0.85 : rain;
-                    const pet = calcPET(tAvg, tMinH, tMaxH, lat, getDayOfYear(row[4]));
-                    d30Sum += (rainEff - pet);
+                    const etc = calcETc(tAvg, tMinH, tMaxH, lat, getDayOfYear(row[4]), si);
+                    d30Sum += (rainEff - etc);
                 }
                 // 加上预报中的未来几天
                 for (let i = 1; i <= dayIdx; i++) {
@@ -740,16 +831,18 @@ createApp({
                     if (!fc) break;
                     const rainEff = (fc.precipitation_total || 0) > 10 ? fc.precipitation_total * 0.85 : (fc.precipitation_total || 0);
                     const tAvg = fc.temp_avg || ((fc.temp_min || 0) + (fc.temp_max || 0)) / 2;
-                    const pet = calcPET(tAvg, fc.temp_min, fc.temp_max, lat, getDayOfYear(fc.date));
-                    d30Sum += (rainEff - pet);
+                    const etc = calcETc(tAvg, fc.temp_min, fc.temp_max, lat, getDayOfYear(fc.date), si);
+                    d30Sum += (rainEff - etc);
                 }
-                sel.d30 = d30Sum.toFixed(1) + 'mm';
-                const isDrought = d30Sum < -70;
-                const isMildDrought = d30Sum < -40;
+                totalDepletion = Math.max(0, -d30Sum);
+                const ksVal = calcKs(totalDepletion, RAW);
+                sel.d30 = `${d30Sum.toFixed(0)} / ${RAW.toFixed(0)}mm`;
+                const isDrought = d30Sum < -RAW;
+                const isMildDrought = d30Sum < -RAW * 0.6;
                 risks.value[0].status = isDrought ? '重度干旱' : (isMildDrought ? '轻度干旱' : '适宜');
                 risks.value[0].color = isDrought ? '#ef4444' : (isMildDrought ? '#f59e0b' : '#10b981');
-                if (isDrought) msgs.push({type:'diag-danger', text:'🔴 重度干旱预警：D30水分严重亏缺('+sel.d30+')，需及时灌溉。'});
-                else if (isMildDrought) msgs.push({type:'diag-warning', text:'🟡 轻度干旱：D30水分偏低('+sel.d30+')，注意保墒。'});
+                if (isDrought) msgs.push({type:'diag-danger', text:`🔴 重度干旱预警：水分亏缺${d30Sum.toFixed(0)}mm（允许${RAW.toFixed(0)}mm），Ks=${ksVal.toFixed(2)}，需及时灌溉。`});
+                else if (isMildDrought) msgs.push({type:'diag-warning', text:`🟡 轻度干旱：水分偏低${d30Sum.toFixed(0)}mm（允许${RAW.toFixed(0)}mm），注意保墒。`});
             }
 
             // ===== 2. 高温热害 =====
@@ -892,6 +985,17 @@ createApp({
                 msgs.push({type: 'diag-warning', text: `🟡 ${p.name}预警：${p.detail}。`});
             }
 
+            // ===== FAO-33 产量损失估算 =====
+            const allTowns2 = Object.values(TOWN_DATA).flat();
+            const curTown2 = allTowns2.find(t => t.id === townId);
+            const lat2 = curTown2 ? curTown2.lat : 45;
+            const etc2 = calcETc(
+                item.temp_avg || ((item.temp_min||0)+(item.temp_max||0))/2,
+                item.temp_min, item.temp_max, lat2, getDayOfYear(item.date), si
+            );
+            const dayLoss = calcYieldLoss(item.precipitation_total || 0, etc2, si);
+            totalYieldLoss.value = dayLoss;
+
             diagMsgs.value = msgs;
         };
 
@@ -938,7 +1042,7 @@ createApp({
             provinceList, selectedProvince, selectedTownId, currentCities,
             plantingDate, currentStage, historyDays,
             viewYear, viewMonth, calDays,
-            risks, sel, diagMsgs,
+            risks, sel, diagMsgs, totalYieldLoss,
             onProvinceChange, onTownChange, onPlantingDateChange, clickCalDate
         };
     }
